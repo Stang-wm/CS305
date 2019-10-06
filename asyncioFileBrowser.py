@@ -1,9 +1,6 @@
-#!/usr/bin/env python
-# coding=utf-8
 import os
 import mimetypes
 import asyncio
-import posixpath
 import datetime
 from urllib.parse import unquote
 
@@ -53,7 +50,6 @@ async def browse(reader, writer):
                 for e in os.listdir(path):
                     file_path = path + ('/' if path[-1] != '/' else '') + e
                     # file_path_display = file_path.replace(" ", "_")
-                    print(file_path)
                     m_time = str(datetime.datetime.fromtimestamp(os.path.getmtime(file_path)))
                     size = str(os.path.getsize(file_path))
 
