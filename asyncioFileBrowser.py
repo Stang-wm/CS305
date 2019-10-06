@@ -12,12 +12,13 @@ def mime_type(path):
     # How to get file extension name:
     # https://stackoverflow.com/questions/541390/extracting-extension-from-filename-in-python
     filename, file_extension = os.path.splitext(path)
+    file_extension = file_extension.lower()
     # type_map customize
     mimetypes.types_map['.py'] = 'text/plain'
     mimetypes.types_map['.c'] = 'text/plain'
     mimetypes.types_map['.java'] = 'text/plain'
     if file_extension in mimetypes.types_map:
-        return mimetypes.guess_type(path)[0]  # https://docs.python.org/2/library/mimetypes.html
+        return str(mimetypes.types_map[file_extension])  # https://docs.python.org/2/library/mimetypes.html
     else:
         return 'application/octet-stream'  # For download
 
@@ -51,6 +52,8 @@ async def browse(reader, writer):
 
                 for e in os.listdir(path):
                     file_path = path + ('/' if path[-1] != '/' else '') + e
+                    # file_path_display = file_path.replace(" ", "_")
+                    print(file_path)
                     m_time = str(datetime.datetime.fromtimestamp(os.path.getmtime(file_path)))
                     size = str(os.path.getsize(file_path))
 
