@@ -68,7 +68,6 @@ async def browse(reader, writer):
                 file = open(path, 'rb')  # read binary
                 content = [
                     b'HTTP/1.0 200 OK\r\n',
-                    b'Content-Type:text/html; charset=utf-8\r\n',
                     b'Connection: close\r\n',
                     bytes('Content-Length: ' + str(size) + '\r\n', 'utf-8'),
                     bytes('Content-Type: ' + mime_type(path) + '\r\n', 'utf-8'),
@@ -99,7 +98,6 @@ async def browse(reader, writer):
                 size = os.path.getsize(path)
                 content = [
                     b'HTTP/1.0 200 OK\r\n',
-                    b'Content-Type:text/html; charset=utf-8\r\n',
                     b'Connection: close\r\n',
                     bytes('Content-Length: ' + str(size) + '\r\n', 'utf-8'),
                     bytes('Content-Type: ' + mime_type(path) + '\r\n', 'utf-8'),
