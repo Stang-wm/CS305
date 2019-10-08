@@ -32,7 +32,11 @@ async def browse(reader, writer):
     print(message)
     # Method: https://www.w3.org/Protocols/rfc2616/rfc2616-sec9.html
     method = message[0]
-    path = "." + message[1]
+
+    # Fix problem at here... previous code is `path = '.' + message[1]`
+    # Add the "." will cause a problem of accessing sub directory
+    path = message[1]
+
     if method == "GET":
         if os.path.exists(path):
             if os.path.isdir(path):
@@ -49,7 +53,6 @@ async def browse(reader, writer):
 
                 for e in os.listdir(path):
                     file_path = path + ('/' if path[-1] != '/' else '') + e
-                    # file_path_display = file_path.replace(" ", "_")
                     m_time = str(datetime.datetime.fromtimestamp(os.path.getmtime(file_path)))
                     size = str(os.path.getsize(file_path))
 
