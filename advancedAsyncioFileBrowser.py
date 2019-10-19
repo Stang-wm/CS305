@@ -1,9 +1,26 @@
 import os
 import mimetypes
 import asyncio
-import datetime
+import time
+from datetime import datetime
 from urllib.parse import unquote
+from http.server import BaseHTTPRequestHandler
+from io import BytesIO
+import hashlib
 from http import cookies
+
+
+class HTTPRequest(BaseHTTPRequestHandler):
+    # https://stackoverflow.com/questions/4685217/parse-raw-http-headers
+    def __init__(self, request_text):
+        self.rfile = BytesIO(request_text)
+        self.raw_requestline = self.rfile.readline()
+        self.error_code = self.error_message = None
+        self.parse_request()
+
+    def send_error(self, code, message):
+        self.error_code = code
+        self.error_message = message
 
 
 def mime_type(path):
@@ -21,57 +38,86 @@ def mime_type(path):
         return 'application/octet-stream'  # For download
 
 
-last_visit = ""
-
-
 async def browse(reader, writer):
-    message = []
+    message = ""
     while True:
         data = await reader.readline()
-        message += data.decode().split(' ')
+        message += data.decode()
         if data == b'\r\n':
             break
 
-    message[1] = unquote(message[1])
-    print(message)
-    # Method: https://www.w3.org/Protocols/rfc2616/rfc2616-sec9.html
-    method = message[0]
+    request_parse = HTTPRequest(message.encode())
 
+    # Method: https://www.w3.org/Protocols/rfc2616/rfc2616-sec9.html
+    method = request_parse.command
+    request_version = request_parse.request_version
     # Fix problem at here... previous code is `path = '.' + message[1]`
     # Add the "." will cause a problem of accessing sub directory
-    path = message[1]
+    path = unquote(request_parse.path)
+
+    if request_parse.headers['Cookie'] == None:
+        last_dir_request = "514"
+    else:
+        cookie_request = cookies.SimpleCookie(request_parse.headers['Cookie'])
+        print(cookie_request)
+        last_dir_request = cookie_request['last_dir'].value
+
+    print(method, path, request_version, last_dir_request)
+    # print(message)
+    print("---")
+
+    # time_fmt: https://docs.python.org/2/library/time.html
+    last_mod = datetime.fromtimestamp(time.time()).strftime('%a, %d %b %Y %H:%M:%S GMT')
 
     if method == "GET":
         if os.path.exists(path):
             if os.path.isdir(path):
-                if path == "/":
-                    content = [b'HTTP/1.0 302 Found\r\n',
-                               b'Content-Type:text/html; charset=utf-8\r\n',
+                if path == "/" and last_dir_request != "/" and last_dir_request != "514":
+                    content = [b'HTTP/1.1 302 Found\r\n',
+                               b'Content-Type: text/html; charset=utf-8\r\n',
+                               bytes('last-modified:' + last_mod + '\r\n', 'utf-8'),
+                               bytes('Location:' + last_dir_request + '\r\n', 'utf-8'),
                                b'Connection: close\r\n',
-                               b'\r\n'
-                               b'<html><body><h1>302 Found</h1><body></html>\r\n',
                                b'\r\n']
                     writer.writelines(content)
                 else:
-                    content = [b'HTTP/1.0 200 OK\r\n',
-                               b'Content-Type:text/html; charset=utf-8\r\n',
+                    c = cookies.SimpleCookie()
+                    c['last_dir'] = path
+                    c['last_dir']['path'] = "/"
+                    content = [b'HTTP/1.1 200 OK\r\n',
+                               b'Content-Types: text/html; charset=utf-8\r\n',
+                               bytes('last-modified:' + last_mod + '\r\n', 'utf-8'),
+                               c.output().encode(), b'\r\n',
                                b'Connection: close\r\n',
                                b'\r\n',
-                               bytes('<html><head><title>Index of ' + path + '</title></head>', 'utf-8'),
-                               bytes('<h1>Index of ' + path + '</h1>', 'utf-8'),
-                               b'<table>',
-                               b'<tr><th><b>Name</b></th><th><b>Last modified</b></th><th><b>Size</b></th></tr>',
-                               b'<tr><th colspan="3"><hr></th></tr>']
+                               bytes(
+                                   '<html><head><meta charset="UTF-8"><title>Index of ' + path + '</title></head>\r\n',
+                                   'utf-8'),
+                               bytes('<body><h1>Index of ' + path + '</h1>\r\n', 'utf-8'),
+                               b'<table>\r\n',
+                               b'<tr><th><b>Name</b></th><th><b>Last modified</b></th><th><b>Size</b></th></tr>\r\n',
+                               b'<tr><th colspan="3"><hr></th></tr>\r\n',
+                               b'\r\n']
+
+                    fp_return = path + ('/' if path[-1] != '/' else '') + ".."
+                    content.append(
+                        bytes(
+                            '<tr><td><a href= ' + fp_return + '>..</a></td><td>' + "-" +
+                            '</td><td>' + "-" + '</td></tr>\r\n',
+                            'utf-8'))
 
                     for e in os.listdir(path):
                         file_path = path + ('/' if path[-1] != '/' else '') + e
-                        m_time = str(datetime.datetime.fromtimestamp(os.path.getmtime(file_path)))
-                        size = str(os.path.getsize(file_path))
+                        m_time = datetime.fromtimestamp(os.path.getmtime(file_path)).strftime('%Y-%m-%d %H:%M:%S')
+                        if os.path.isdir(file_path):
+                            size = "-"
+                        else:
+                            size = str(os.path.getsize(file_path))
 
                         content.append(
                             bytes(
                                 '<tr><td><a href=' + file_path + '>' + e + '</a></td><td>' + m_time +
-                                '</td><td>' + size + '</td></tr>',
+                                '</td><td>' + size + '</td></tr>\r\n',
                                 'utf-8'))
                     content += [b'</table>'
                                 b'<hr>'
@@ -80,56 +126,62 @@ async def browse(reader, writer):
                     writer.writelines(content)
             else:
                 size = os.path.getsize(path)
+                m_time = datetime.fromtimestamp(os.path.getmtime(path)).strftime('%a, %d %b %Y %H:%M:%S GMT')
                 file = open(path, 'rb')  # read binary
                 content = [
-                    b'HTTP/1.0 200 OK\r\n',
-                    b'Connection: close\r\n',
+                    b'HTTP/1.1 206 Partial Content\r\n',
+                    bytes('last-modified:' + m_time + '\r\n', 'utf-8'),
                     bytes('Content-Length: ' + str(size) + '\r\n', 'utf-8'),
                     bytes('Content-Type: ' + mime_type(path) + '\r\n', 'utf-8'),
+                    b'Connection: close\r\n',
                     b'\r\n']
                 writer.writelines(content)
                 writer.write(file.read())
         else:  # 404
             content = [
-                b'HTTP/1.0 404 Not found\r\n',
+                b'HTTP/1.1 404 Not found\r\n',
                 b'Content-Type:text/html; charset=utf-8\r\n',
                 b'Connection: close\r\n',
                 b'\r\n',
-                b'<html><body><h1>404 Not found</h1><body></html>\r\n',
+                b'<html><head><meta charset="UTF-8" /><title>404 Not found</title></head>',
+                b'<body><h1>404 Not found</h1><body></html>\r\n',
                 b'\r\n'
             ]
             writer.writelines(content)
     elif method == "HEAD":
-        # https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods/HEAD
         if os.path.exists(path):
             if os.path.isdir(path):
-                content = [b'HTTP/1.0 200 OK\r\n',
-                           b'Content-Type:text/html; charset=utf-8\r\n',
+                content = [b'HTTP/1.1 200 OK\r\n',
+                           b'Content-Type: text/html; charset=utf-8\r\n',
+                           bytes('last-modified:' + last_mod + '\r\n', 'utf-8'),
                            b'Connection: close\r\n',
                            b'\r\n']
                 writer.writelines(content)
             else:
                 size = os.path.getsize(path)
+                m_time = datetime.fromtimestamp(os.path.getmtime(path)).strftime('%a, %d %b %Y %H:%M:%S GMT')
                 content = [
-                    b'HTTP/1.0 200 OK\r\n',
-                    b'Connection: close\r\n',
+                    b'HTTP/1.1 200 OK\r\n',
+                    bytes('last-modified:' + m_time + '\r\n', 'utf-8'),
                     bytes('Content-Length: ' + str(size) + '\r\n', 'utf-8'),
                     bytes('Content-Type: ' + mime_type(path) + '\r\n', 'utf-8'),
+                    b'Connection: close\r\n',
                     b'\r\n']
                 writer.writelines(content)
         else:
             content = [
-                b'HTTP/1.0 404 Not found\r\n',
+                b'HTTP/1.1 404 Not found\r\n',
                 b'Content-Type:text/html; charset=utf-8\r\n',
                 b'Connection: close\r\n',
                 b'\r\n',
-                b'<html><body><h1>404 Not found</h1><body></html>\r\n',
+                b'<html><head><meta charset="UTF-8" /><title>404 Not found</title></head>\r\n',
+                b'<body><h1>404 Not found</h1><body></html>\r\n',
                 b'\r\n']
             writer.writelines(content)
     else:
         content = [
-            b'HTTP/1.0 405 Method Not Allowed',
-            b'Content-Type:text/html; charset=utf-8\r\n',
+            b'HTTP/1.1 405 Method Not Allowed\r\n',
+            b'Content-Type: text/html; charset=utf-8\r\n',
             b'Connection: close\r\n',
             b'\r\n',
             b'<html><body><h1>405 Method Not Allowed</h1><body></html>\r\n',
