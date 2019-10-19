@@ -65,10 +65,10 @@ async def browse(reader, writer):
     range_request = str(request_parse.headers['range'])
     range_request = range_request[range_request.find("=") + 1:]
 
-    if_range = str(request_parse.headers['If-Range'])
+    if_match = str(request_parse.headers['If-Match'])
 
-    print(method, path, request_version, last_dir_request, range_request, if_range)
-    # print(message)
+    print(method, path, request_version, last_dir_request, range_request, if_match)
+    print(message)
     print("---")
 
     # time_fmt: https://docs.python.org/2/library/time.html
@@ -147,8 +147,9 @@ async def browse(reader, writer):
                         range_end = int(range_request[range_request.find("-") + 1:])
                         is_range = 1
 
-                # print("w", if_range, e_tag)
-                if if_range is None or if_range != e_tag:
+                print("w", if_match, "\"" + e_tag + "\"")
+                if is_range == 0 or if_match is None or if_match != "\"" + e_tag + "\"":
+                # if False:
                     file = open(path, 'rb')  # read binary
                     content = [
                         b'HTTP/1.1 200 OK\r\n',
