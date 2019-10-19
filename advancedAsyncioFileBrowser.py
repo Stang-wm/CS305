@@ -6,7 +6,7 @@ from datetime import datetime
 from urllib.parse import unquote
 from http.server import BaseHTTPRequestHandler
 from io import BytesIO
-import hashlib
+import uuid
 from http import cookies
 
 
@@ -55,14 +55,19 @@ async def browse(reader, writer):
     # Add the "." will cause a problem of accessing sub directory
     path = unquote(request_parse.path)
 
-    if request_parse.headers['Cookie'] == None:
+    if request_parse.headers['Cookie'] is None:
         last_dir_request = "514"
     else:
         cookie_request = cookies.SimpleCookie(request_parse.headers['Cookie'])
         print(cookie_request)
         last_dir_request = cookie_request['last_dir'].value
 
-    print(method, path, request_version, last_dir_request)
+    range_request = str(request_parse.headers['range'])
+    range_request = range_request[range_request.find("=") + 1:]
+
+    if_range = str(request_parse.headers['If-Range'])
+
+    print(method, path, request_version, last_dir_request, range_request, if_range)
     # print(message)
     print("---")
 
@@ -87,8 +92,8 @@ async def browse(reader, writer):
                     content = [b'HTTP/1.1 200 OK\r\n',
                                b'Content-Types: text/html; charset=utf-8\r\n',
                                bytes('last-modified:' + last_mod + '\r\n', 'utf-8'),
-                               c.output().encode(), b'\r\n',
-                               b'Connection: close\r\n',
+                               c.output().encode(),
+                               b'\r\nConnection: close\r\n',
                                b'\r\n',
                                bytes(
                                    '<html><head><meta charset="UTF-8"><title>Index of ' + path + '</title></head>\r\n',
@@ -127,16 +132,59 @@ async def browse(reader, writer):
             else:
                 size = os.path.getsize(path)
                 m_time = datetime.fromtimestamp(os.path.getmtime(path)).strftime('%a, %d %b %Y %H:%M:%S GMT')
-                file = open(path, 'rb')  # read binary
-                content = [
-                    b'HTTP/1.1 206 Partial Content\r\n',
-                    bytes('last-modified:' + m_time + '\r\n', 'utf-8'),
-                    bytes('Content-Length: ' + str(size) + '\r\n', 'utf-8'),
-                    bytes('Content-Type: ' + mime_type(path) + '\r\n', 'utf-8'),
-                    b'Connection: close\r\n',
-                    b'\r\n']
-                writer.writelines(content)
-                writer.write(file.read())
+
+                ex = str(os.path.getmtime(path)) + " -> " + path
+                e_tag = str(uuid.uuid3(uuid.NAMESPACE_URL, ex))
+
+                range_start = 0
+                range_end = size
+                is_range = 0
+                if range_request.find("-") != -1:
+                    if range_request[:range_request.find("-")] != "":
+                        range_start = int(range_request[:range_request.find("-")])
+                        is_range = 1
+                    if range_request[range_request.find("-") + 1:] != "":
+                        range_end = int(range_request[range_request.find("-") + 1:])
+                        is_range = 1
+
+                # print("w", if_range, e_tag)
+                if if_range is None or if_range != e_tag:
+                    file = open(path, 'rb')  # read binary
+                    content = [
+                        b'HTTP/1.1 200 OK\r\n',
+                        bytes('last-modified:' + m_time + '\r\n', 'utf-8'),
+                        bytes('Content-Length: ' + str(size) + '\r\n', 'utf-8'),
+                        bytes('Content-Type: ' + mime_type(path) + '\r\n', 'utf-8'),
+                        bytes('ETag: "' + e_tag + '"\r\n', 'utf-8'),
+                        b'Connection: close\r\n',
+                        b'\r\n']
+                    writer.writelines(content)
+                    writer.write(file.read())
+                else:
+                    if range_start < 0 or range_start > size or range_end < 0 \
+                            or range_end > size or range_end < range_start:
+                        content = [
+                            b'HTTP/1.1 416 Range Not Satisfiable\r\n',
+                            bytes('Content-Range: */' + str(size) + '\r\n', 'utf-8'),
+                            b'Connection: close\r\n',
+                            b'\r\n']
+                        writer.writelines(content)
+                    else:
+                        content = [
+                            b'HTTP/1.1 206 Partial Content\r\n',
+                            bytes('last-modified:' + m_time + '\r\n', 'utf-8'),
+                            bytes('Content-Length: ' + str(size) + '\r\n', 'utf-8'),
+                            bytes('Content-Type: ' + mime_type(path) + '\r\n', 'utf-8'),
+                            b'Accept-Ranges: bytes\r\n',
+                            bytes('Content-Range: bytes ' + range_request + '/' + str(size) + '\r\n', 'utf-8'),
+                            bytes('ETag: "' + e_tag + '"\r\n', 'utf-8'),
+                            b'Connection: close\r\n',
+                            b'\r\n']
+                        with open(path, 'rb') as fin:
+                            fin.seek(range_start)
+                            data = fin.read(range_end - range_start)
+                        writer.writelines(content)
+                        writer.write(data)
         else:  # 404
             content = [
                 b'HTTP/1.1 404 Not found\r\n',
@@ -148,6 +196,7 @@ async def browse(reader, writer):
                 b'\r\n'
             ]
             writer.writelines(content)
+
     elif method == "HEAD":
         if os.path.exists(path):
             if os.path.isdir(path):
