@@ -10,8 +10,9 @@ import uuid
 from http import cookies
 
 
+# NOTICE: This file require python >= 3.7.4
+
 class HTTPRequest(BaseHTTPRequestHandler):
-    # https://stackoverflow.com/questions/4685217/parse-raw-http-headers
     def __init__(self, request_text):
         self.rfile = BytesIO(request_text)
         self.raw_requestline = self.rfile.readline()
@@ -46,15 +47,21 @@ async def browse(reader, writer):
         if data == b'\r\n':
             break
 
+    # Use HTTPRequest parse HTTP request
+    # https://stackoverflow.com/questions/4685217/parse-raw-http-headers
     request_parse = HTTPRequest(message.encode())
 
     # Method: https://www.w3.org/Protocols/rfc2616/rfc2616-sec9.html
     method = request_parse.command
+
+    # Request version, i.e. "HTTP/1.1"
     request_version = request_parse.request_version
+
     # Fix problem at here... previous code is `path = '.' + message[1]`
     # Add the "." will cause a problem of accessing sub directory
     path = unquote(request_parse.path)
 
+    # Read cookie information
     if request_parse.headers['Cookie'] is None:
         last_dir_request = "514"
     else:
@@ -62,22 +69,25 @@ async def browse(reader, writer):
         print(cookie_request)
         last_dir_request = cookie_request['last_dir'].value
 
+    # Read range and "if-match" header
     range_request = str(request_parse.headers['range'])
     range_request = range_request[range_request.find("=") + 1:]
-
     if_match = str(request_parse.headers['If-Match'])
 
     print(method, path, request_version, last_dir_request, range_request, if_match)
-    print(message)
+    # print(message)
     print("---")
 
     # time_fmt: https://docs.python.org/2/library/time.html
+    # Ref: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Last-Modified
+    # For the "last-modified" header, format looks like: "Wed, 21 Oct 2015 07:28:00 GMT"
     last_mod = datetime.fromtimestamp(time.time()).strftime('%a, %d %b %Y %H:%M:%S GMT')
 
     if method == "GET":
         if os.path.exists(path):
             if os.path.isdir(path):
                 if path == "/" and last_dir_request != "/" and last_dir_request != "514":
+                    # 302 -> Redirect
                     content = [b'HTTP/1.1 302 Found\r\n',
                                b'Content-Type: text/html; charset=utf-8\r\n',
                                bytes('last-modified:' + last_mod + '\r\n', 'utf-8'),
@@ -86,9 +96,11 @@ async def browse(reader, writer):
                                b'\r\n']
                     writer.writelines(content)
                 else:
+                    # Set cookie
                     c = cookies.SimpleCookie()
                     c['last_dir'] = path
                     c['last_dir']['path'] = "/"
+
                     content = [b'HTTP/1.1 200 OK\r\n',
                                b'Content-Types: text/html; charset=utf-8\r\n',
                                bytes('last-modified:' + last_mod + '\r\n', 'utf-8'),
@@ -129,13 +141,16 @@ async def browse(reader, writer):
                                 b'</body></html>\r\n',
                                 b'\r\n']
                     writer.writelines(content)
-            else:
+            else:  # file transfer
                 size = os.path.getsize(path)
                 m_time = datetime.fromtimestamp(os.path.getmtime(path)).strftime('%a, %d %b %Y %H:%M:%S GMT')
 
+                # ETag is used to insure file are not modified when paused.
+                # For this program, I use a string-based UUID as ETag
                 ex = str(os.path.getmtime(path)) + " -> " + path
                 e_tag = str(uuid.uuid3(uuid.NAMESPACE_URL, ex))
 
+                # Parse "Range" header. It looks mostly like "114514-"
                 range_start = 0
                 range_end = size
                 is_range = 0
@@ -147,9 +162,12 @@ async def browse(reader, writer):
                         range_end = int(range_request[range_request.find("-") + 1:])
                         is_range = 1
 
-                print("w", if_match, "\"" + e_tag + "\"")
+                # print("★", if_match, "\"" + e_tag + "\"")
+                # if is_range == 0 :
+
+                # One thing need to notice is:
+                # client-passed "if-match" contains double quote mark at both side
                 if is_range == 0 or if_match is None or if_match != "\"" + e_tag + "\"":
-                # if False:
                     file = open(path, 'rb')  # read binary
                     content = [
                         b'HTTP/1.1 200 OK\r\n',
@@ -161,7 +179,9 @@ async def browse(reader, writer):
                         b'\r\n']
                     writer.writelines(content)
                     writer.write(file.read())
+                    file.close()
                 else:
+                    # illegal range check
                     if range_start < 0 or range_start > size or range_end < 0 \
                             or range_end > size or range_end < range_start:
                         content = [
@@ -181,11 +201,14 @@ async def browse(reader, writer):
                             bytes('ETag: "' + e_tag + '"\r\n', 'utf-8'),
                             b'Connection: close\r\n',
                             b'\r\n']
+                        # read part of the file
+                        # https://stackoverflow.com/q/15644859
                         with open(path, 'rb') as fin:
                             fin.seek(range_start)
                             data = fin.read(range_end - range_start)
                         writer.writelines(content)
                         writer.write(data)
+                        fin.close()
         else:  # 404
             content = [
                 b'HTTP/1.1 404 Not found\r\n',
