@@ -7,6 +7,7 @@ from urllib.parse import unquote
 from http.server import BaseHTTPRequestHandler
 from io import BytesIO
 import uuid
+import base64
 from http import cookies
 
 
@@ -61,12 +62,16 @@ async def browse(reader, writer):
     # Add the "." will cause a problem of accessing sub directory
     path = unquote(request_parse.path)
 
+    # Which page user comes from
+    # we only redirect when this field is empty
+    referer = request_parse.headers['Referer']
+
     # Read cookie information
     if request_parse.headers['Cookie'] is None:
-        last_dir_request = "514"
+        last_dir_request = base64.b64encode('/'.encode()).decode()
     else:
         cookie_request = cookies.SimpleCookie(request_parse.headers['Cookie'])
-        print(cookie_request)
+        # print(cookie_request)
         last_dir_request = cookie_request['last_dir'].value
 
     # Read range and "if-match" header
@@ -74,7 +79,7 @@ async def browse(reader, writer):
     range_request = range_request[range_request.find("=") + 1:]
     if_match = str(request_parse.headers['If-Match'])
 
-    print(method, path, request_version, last_dir_request, range_request, if_match)
+    print(method, path, request_version, referer, last_dir_request, range_request, if_match)
     # print(message)
     print("---")
 
@@ -86,20 +91,24 @@ async def browse(reader, writer):
     if method == "GET":
         if os.path.exists(path):
             if os.path.isdir(path):
-                if path == "/" and last_dir_request != "/" and last_dir_request != "514":
+                if path == "/" and base64.b64decode(last_dir_request.encode()).decode() != "/" \
+                        and referer is None:
                     # 302 -> Redirect
                     content = [b'HTTP/1.1 302 Found\r\n',
                                b'Content-Type: text/html; charset=utf-8\r\n',
                                bytes('last-modified:' + last_mod + '\r\n', 'utf-8'),
-                               bytes('Location:' + last_dir_request + '\r\n', 'utf-8'),
+                               bytes('Location:' + base64.b64decode(
+                                   last_dir_request.encode()).decode() + '\r\n', 'utf-8'),
                                b'Connection: close\r\n',
                                b'\r\n']
                     writer.writelines(content)
                 else:
                     # Set cookie
                     c = cookies.SimpleCookie()
-                    c['last_dir'] = path
-                    c['last_dir']['path'] = "/"
+                    path_b64 = base64.b64encode(path.encode()).decode()
+
+                    c['last_dir'] = path_b64
+                    c['last_dir']['path'] = '/'
 
                     content = [b'HTTP/1.1 200 OK\r\n',
                                b'Content-Types: text/html; charset=utf-8\r\n',
@@ -167,7 +176,8 @@ async def browse(reader, writer):
 
                 # One thing need to notice is:
                 # client-passed "if-match" contains double quote mark at both side
-                if is_range == 0 or if_match is None or if_match != "\"" + e_tag + "\"":
+                # Only handle (if-match != etag). Some client do not send this flag like IDM(
+                if is_range == 0 or (if_match is not None and if_match != "\"" + e_tag + "\""):
                     file = open(path, 'rb')  # read binary
                     content = [
                         b'HTTP/1.1 200 OK\r\n',
