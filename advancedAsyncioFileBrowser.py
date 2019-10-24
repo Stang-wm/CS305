@@ -162,7 +162,7 @@ async def browse(reader, writer):
 
                 # Parse "Range" header. It looks mostly like "114514-"
                 range_start = 0
-                range_end = size - 1
+                range_end = size
                 is_range = 0
                 if range_request.find("-") != -1:
                     if range_request[:range_request.find("-")] != "":
@@ -178,7 +178,7 @@ async def browse(reader, writer):
                 # One thing need to notice is:
                 # client-passed "if-match" contains double quote mark at both side
                 # Only handle (if-match != etag). Some client do not send this flag like IDM(
-                if is_range == 0 or ((if_match is not None and if_match != "None")
+                if is_range == 0 or (if_match is not None and if_match != "None"
                                      and if_match != "\"" + e_tag + "\""):
 
                     file = open(path, 'rb')  # read binary
