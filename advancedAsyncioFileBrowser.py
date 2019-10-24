@@ -9,6 +9,7 @@ from io import BytesIO
 import uuid
 import base64
 from http import cookies
+import chardet
 
 
 # NOTICE: This file require python >= 3.7.4
@@ -161,7 +162,7 @@ async def browse(reader, writer):
 
                 # Parse "Range" header. It looks mostly like "114514-"
                 range_start = 0
-                range_end = size
+                range_end = size - 1
                 is_range = 0
                 if range_request.find("-") != -1:
                     if range_request[:range_request.find("-")] != "":
@@ -177,18 +178,26 @@ async def browse(reader, writer):
                 # One thing need to notice is:
                 # client-passed "if-match" contains double quote mark at both side
                 # Only handle (if-match != etag). Some client do not send this flag like IDM(
-                if is_range == 0 or (if_match is not None and if_match != "\"" + e_tag + "\""):
+                if is_range == 0 or ((if_match is not None and if_match != "None")
+                                     and if_match != "\"" + e_tag + "\""):
+
                     file = open(path, 'rb')  # read binary
+                    mt_str = mime_type(path)
+                    if 'text/' in mime_type(path):
+                        enc = chardet.detect(file.read())['encoding']
+                        file.close()
+                        file = open(path, 'rt', encoding=enc)
+                        mt_str = mt_str + '; charset=' + enc
                     content = [
                         b'HTTP/1.1 200 OK\r\n',
                         bytes('last-modified:' + m_time + '\r\n', 'utf-8'),
                         bytes('Content-Length: ' + str(size) + '\r\n', 'utf-8'),
-                        bytes('Content-Type: ' + mime_type(path) + '\r\n', 'utf-8'),
+                        bytes('Content-Type: ' + mt_str + '\r\n', 'utf-8'),
                         bytes('ETag: "' + e_tag + '"\r\n', 'utf-8'),
                         b'Connection: close\r\n',
                         b'\r\n']
                     writer.writelines(content)
-                    writer.write(file.read())
+                    writer.write(file.read().encode())
                     file.close()
                 else:
                     # illegal range check
@@ -201,24 +210,32 @@ async def browse(reader, writer):
                             b'\r\n']
                         writer.writelines(content)
                     else:
+                        file = open(path, 'rb')  # read binary
+                        mt_str = mime_type(path)
+                        if 'text/' in mime_type(path):
+                            enc = chardet.detect(file.read())['encoding']
+                            file.close()
+                            file = open(path, 'rt', encoding=enc)
+                            mt_str = mt_str + '; charset=' + enc
+
                         content = [
                             b'HTTP/1.1 206 Partial Content\r\n',
                             bytes('last-modified:' + m_time + '\r\n', 'utf-8'),
                             bytes('Content-Length: ' + str(size) + '\r\n', 'utf-8'),
-                            bytes('Content-Type: ' + mime_type(path) + '\r\n', 'utf-8'),
+                            bytes('Content-Type: ' + mt_str + '\r\n', 'utf-8'),
                             b'Accept-Ranges: bytes\r\n',
                             bytes('Content-Range: bytes ' + range_request + '/' + str(size) + '\r\n', 'utf-8'),
                             bytes('ETag: "' + e_tag + '"\r\n', 'utf-8'),
                             b'Connection: close\r\n',
                             b'\r\n']
+
                         # read part of the file
                         # https://stackoverflow.com/q/15644859
-                        with open(path, 'rb') as fin:
-                            fin.seek(range_start)
-                            data = fin.read(range_end - range_start)
+                        file.seek(range_start)
+                        data = file.read(range_end - range_start)
                         writer.writelines(content)
                         writer.write(data)
-                        fin.close()
+                        file.close()
         else:  # 404
             content = [
                 b'HTTP/1.1 404 Not found\r\n',
