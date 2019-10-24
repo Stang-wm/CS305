@@ -3,7 +3,7 @@ import mimetypes
 import asyncio
 import time
 from datetime import datetime
-from urllib.parse import unquote
+from urllib import parse
 from http.server import BaseHTTPRequestHandler
 from io import BytesIO
 import uuid
@@ -61,7 +61,7 @@ async def browse(reader, writer):
 
     # Fix problem at here... previous code is `path = '.' + message[1]`
     # Add the "." will cause a problem of accessing sub directory
-    path = unquote(request_parse.path)
+    path = parse.unquote(request_parse.path)
 
     # Which page user comes from
     # we only redirect when this field is empty
@@ -143,7 +143,7 @@ async def browse(reader, writer):
 
                         content.append(
                             bytes(
-                                '<tr><td><a href=' + file_path + '>' + e + '</a></td><td>' + m_time +
+                                '<tr><td><a href=' + parse.quote(file_path) + '>' + e + '</a></td><td>' + m_time +
                                 '</td><td>' + size + '</td></tr>\r\n',
                                 'utf-8'))
                     content += [b'</table>'
@@ -197,7 +197,10 @@ async def browse(reader, writer):
                         b'Connection: close\r\n',
                         b'\r\n']
                     writer.writelines(content)
-                    writer.write(file.read().encode())
+                    if 'text/' in mime_type(path):
+                        writer.write(file.read().encode())
+                    else:
+                        writer.write(file.read())
                     file.close()
                 else:
                     # illegal range check
@@ -234,7 +237,10 @@ async def browse(reader, writer):
                         file.seek(range_start)
                         data = file.read(range_end - range_start)
                         writer.writelines(content)
-                        writer.write(data)
+                        if 'text/' in mime_type(path):
+                            writer.write(data.encode())
+                        else:
+                            writer.write(data)
                         file.close()
         else:  # 404
             content = [
@@ -292,7 +298,7 @@ async def browse(reader, writer):
 
 
 async def main():
-    server = await asyncio.start_server(browse, '127.0.0.1', 8888)
+    server = await asyncio.start_server(browse, '127.0.0.1', 8080)
     addr = server.sockets[0].getsockname()
     print('Serving on {}'.format(addr))
     async with server:
