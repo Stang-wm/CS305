@@ -10,10 +10,9 @@ class UDPsocket(socket):
         self.corruption_rate = corruption_rate
         self.delay_rate = delay_rate
         self.delay = delay
-        self.timeout = 0.5
 
     def settimeout(self, value):
-        self.timeout = value
+        super().settimeout(value)
 
     def recvfrom(self, bufsize):
         if random.random() < self.delay_rate:
@@ -29,7 +28,7 @@ class UDPsocket(socket):
 
     def recv(self, bufsize):
         data, addr = self.recvfrom(bufsize)
-        return data
+        return data, addr
 
     def _corrupt(self, data: bytes) -> bytes:
         raw = list(data)
