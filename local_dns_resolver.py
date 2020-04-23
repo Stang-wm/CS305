@@ -2,7 +2,7 @@ from socket import *
 from dnslib import DNSRecord
 import time
 
-DNS_Server = '1.1.1.1'  # DNS server provided by CloudFlare
+DNS_Server = '114.114.114.114'  # DNS server provided by CloudFlare
 server_port = 53  # DNS port was 53 at default
 cache = {}  # create dictionary for cache
 latest_ts = 0  # latest timestamp in second
@@ -30,6 +30,9 @@ print("Ready..")
 
 while True:
     message, client_address = server_socket.recvfrom(2048)
+    print(message.decode("utf-8"))
+    print(client_address)
+    print("========")
     request = DNSRecord.parse(message)
     question_req = request.questions
     id_req = request.header.id  # we need this header from further modification
