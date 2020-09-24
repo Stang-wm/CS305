@@ -1,4 +1,5 @@
 import socket
+# import os
 
 
 def echo():
@@ -9,7 +10,14 @@ def echo():
         conn, address = sock.accept()
         while True:
             data = conn.recv(2048)
-            if data and data != b'exit\r\n':
+            if data and data != b'exit':
+                # Different response on different software:
+                #   For Windows, please switch the mode of telnet via typing "Ctrl+]"
+                #       Then use "send <string>" to send text message to echoServer
+                #   For Linux, it is recommended to use "netcat" to connect,
+                #       Telnet on Linux has a different appearance, so it is not necessary to switch mode.
+                #       However, a lineSeparator is required ("\n")
+                #       We could change this line to [("exit" + os.linesep).encode()]
                 conn.send(data)
                 print(data)
             else:
