@@ -3,7 +3,7 @@ import math
 
 def judge(n: int) -> bool:
     digit = int(math.log10(n)) + 1
-    if n == 1:
+    if digit == 1:
         return True
     elif digit < 3:
         return False
